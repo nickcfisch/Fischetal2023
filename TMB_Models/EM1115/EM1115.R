@@ -1,0 +1,356 @@
+
+######################################
+#Implementing TMB on supercomputer
+######################################
+
+require(TMB)
+source("/blue/edvcamp/nfisch/Chapter_4/fit_tmb.R")
+
+run_TMB<-function(N, model, surv, Est_Rsd, PE, wEff){
+ 
+ if(substr(model,8,8)=="1"){
+  comp<-"rnd"
+ }else if (substr(model,8,8) %in% c("2","3")){
+  comp<-"corr"
+ }
+ 
+  if(substr(model,1,4)=="OM11"){
+    OM<-paste0("RF_Dome_",PE,"_40yr_")
+    which_dat<-paste0("dat_file_Indexnom_comp",comp,".dat")
+  }else if(substr(model,1,4)=="OM12"){
+    OM<-paste0("RF_Dome_",PE,"_80yr_")
+    which_dat<-paste0("dat_file_Indexnom_comp",comp,".dat")
+  }else if(substr(model,1,4)=="OM21"){
+    OM<-paste0("RF_Dome_",PE,"_40yr_")
+    which_dat<-paste0("dat_file_Indexalt_comp",comp,".dat")
+  }else if(substr(model,1,4)=="OM22"){
+    OM<-paste0("RF_Dome_",PE,"_80yr_")
+    which_dat<-paste0("dat_file_Indexalt_comp",comp,".dat")
+  }else if(substr(model,1,4)=="OM31"){
+    OM<-paste0("GM_",PE,"_40yr_")
+    which_dat<-paste0("dat_file_Indexalt_comp",comp,".dat")
+  }else if(substr(model,1,4)=="OM32"){
+    OM<-paste0("GM_",PE,"_80yr_")
+    which_dat<-paste0("dat_file_Indexalt_comp",comp,".dat")
+  }else if(substr(model,1,4)=="OM41"){
+    OM<-paste0("GM_",PE,"_40yr_")
+    which_dat<-paste0("dat_file_Indexnom_comp",comp,".dat")
+  }else if(substr(model,1,4)=="OM42"){
+    OM<-paste0("GM_",PE,"_80yr_")
+    which_dat<-paste0("dat_file_Indexnom_comp",comp,".dat")
+  }
+  
+setwd(paste0("/blue/edvcamp/nfisch/Chapter_4/",substr(model,9,14)))
+#Compile and load model 
+if(surv==TRUE){
+   TMB_name<-paste0(substr(model,9,14),"_wsurv")
+} else if (surv==FALSE){
+   TMB_name<-paste0(substr(model,9,14),"_nosurv")
+  }
+  
+  if(wEff==TRUE){
+   TMB_name<-paste0(substr(model,9,14),"_wsurv")
+  }
+  
+ compile(paste0(TMB_name,".cpp"))
+ dyn.load(dynlib(TMB_name))
+ 
+  Linf<-85.64   #L-Infinity (cm)
+  k<-0.19       #Brody Growth Coefficient
+  tnot<--0.39   #T-not
+  Lt<-Linf*(1-exp(-k*(0:20-tnot)))
+  M_vec<-c(2,1.2,(0.099*Lt[8])/Lt[3:21])
+
+  #W-L Relationship
+  a<-1.7E-5
+  b<-3
+  Wt<-a*Lt^b
+ 
+ for (i in N){
+  #Prelim calcs for OM 2 & 3
+  if (substr(model,4,4)=="1"){nyear<-90} else if (substr(model,4,4)=="2"){nyear<-130}
+  GM_dir<-paste0("GM_",PE,"_",nyear-50,"yr_",i)
+  RF_dir<-paste0("RF_Dome_",PE,"_",nyear-50,"yr_",i)
+
+  N_wSpace_postM_GM<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",GM_dir,"/N_wSpace_postM.rds"))
+  Catch_bio_space_GM<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",GM_dir,"/Catch_bio_space.rds"))
+  Effort_space_GM<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",GM_dir,"/Effort_space.rds"))
+  Catch_numage_space_GM<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",GM_dir,"/Catch_numage_space.rds"))
+  F_space_GM<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",GM_dir,"/F_space.rds"))
+  SSB_space_GM<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",GM_dir,"/SSB_space.rds"))
+
+  N_wSpace_postM_RF<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",RF_dir,"/N_wSpace_postM.rds"))
+  Catch_bio_space_RF<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",RF_dir,"/Catch_bio_space.rds"))
+  Effort_space_RF<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",RF_dir,"/Effort_space.rds"))
+  Catch_numage_space_RF<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",RF_dir,"/Catch_numage_space.rds"))
+  F_space_RF<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",RF_dir,"/F_space.rds"))
+  SSB_space_RF<-readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",RF_dir,"/SSB_space.rds"))
+
+  mod_GM<-mod_RF<-list()
+  mod_GM$N_bar<-array(0, dim=c(dim(N_wSpace_postM_GM)[1],dim(N_wSpace_postM_GM)[2],dim(N_wSpace_postM_GM)[3]))
+  mod_RF$N_bar<-array(0, dim=c(dim(N_wSpace_postM_RF)[1],dim(N_wSpace_postM_RF)[2],dim(N_wSpace_postM_RF)[3]))
+  for (k in 1:(dim(N_wSpace_postM_GM)[1]-6)){
+   for (j in 1:dim(N_wSpace_postM_GM)[2]){ 
+    mod_GM$N_bar[k,j,]<-(N_wSpace_postM_GM[k,j,]*(1-exp(-(M_vec[j]+F_space_GM[k,j,]))))/(M_vec[j]+F_space_GM[k,j,])  
+    mod_RF$N_bar[k,j,]<-(N_wSpace_postM_RF[k,j,]*(1-exp(-(M_vec[j]+F_space_RF[k,j,]))))/(M_vec[j]+F_space_RF[k,j,])
+   } 
+  }
+  mod_GM$Sel_true<-(rowSums(Catch_numage_space_GM[1:nyear,,],dims=2)/rowSums(mod_GM$N_bar[1:nyear,,],dims=2))/apply(rowSums(Catch_numage_space_GM[1:nyear,,],dims=2)/rowSums(mod_GM$N_bar[1:nyear,,],dims=2),1,max,na.rm = T)
+  mod_GM$realized_q<-rowSums(Catch_bio_space_GM[1:nyear,])/(rowSums(Effort_space_GM[1:nyear,])*rowSums(rowSums(mod_GM$N_bar[1:nyear,,], dims=2)*mod_GM$Sel_true[1:nyear,]*matrix(rep(Wt,length(1:nyear)),byrow=T,nrow=length(1:nyear), ncol=21)))
+  mod_RF$Sel_true<-(rowSums(Catch_numage_space_RF[1:nyear,,],dims=2)/rowSums(mod_RF$N_bar[1:nyear,,],dims=2))/apply(rowSums(Catch_numage_space_RF[1:nyear,,],dims=2)/rowSums(mod_RF$N_bar[1:nyear,,],dims=2),1,max,na.rm = T)
+  mod_RF$realized_q<-rowSums(Catch_bio_space_RF[1:nyear,])/(rowSums(Effort_space_RF[1:nyear,])*rowSums(rowSums(mod_RF$N_bar[1:nyear,,], dims=2)*mod_RF$Sel_true[1:nyear,]*matrix(rep(Wt,length(1:nyear)),byrow=T,nrow=length(1
+:nyear), ncol=21)))
+ 
+#Reading dat file for specific OM replicate
+  if (substr(model,8,8)=="1"){
+   x<-scan(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",OM,substr(model,5,7),".",substr(model,8,8),"_",i,"/",which_dat))
+   if (substr(model,3,3) %in% c("1","4")){
+    Eff<-rowSums(readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",OM,substr(model,5,7),".",substr(model,8,8),"_",i,"/Effort_space.rds")))
+   }
+  }else if (substr(model,8,8) %in% c("2","3")){
+   x<-scan(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",OM,substr(model,5,7),".",as.numeric(substr(model,8,8))-1,"_",i,"/",which_dat))
+   if(substr(model,3,3) %in% c("1","4")){
+    Eff<-rowSums(readRDS(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",OM,substr(model,5,7),".",as.numeric(substr(model,8,8))-1,"_",i,"/Effort_space.rds")))
+   }
+  }  
+  
+#The models where we have to do a switcheroo to get an effort time series
+   if(substr(model,3,3)=="2"){
+     Eff<-(rowSums(Catch_bio_space_RF)[1:nyear])/(mod_GM$realized_q[1:nyear]*rowSums(t(t(rowSums(mod_RF$N_bar[1:nyear,,],dims=2)*mod_RF$Sel_true[1:nyear,])*Wt)))
+   } else if(substr(model,3,3)=="3"){
+     Eff<-(rowSums(Catch_bio_space_GM)[1:nyear])/(mod_RF$realized_q[1:nyear]*rowSums(t(t(rowSums(mod_GM$N_bar[1:nyear,,],dims=2)*mod_GM$Sel_true[1:nyear,])*Wt)))
+   }
+
+  if (substr(model,4,4)=="1"){
+  lmax_F<-c(-3.397353, -3.274413, -3.133463, -2.975869, -2.804664, -2.624553, -2.441559, -2.262295, -2.093026, -1.938777, -1.802763, -1.686263, -1.588892,
+   -1.509104,-1.444715, -1.393338, -1.352676, -1.320676, -1.295588, -1.275967, -1.260648, -1.248699, -1.239385, -1.232128, -1.226475, -1.222071, -1.218641,
+   -1.215970,-1.213890, -1.212270, -1.234272, -1.257415, -1.281760, -1.307367, -1.334304, -1.362638, -1.392442, -1.423792, -1.456769, -1.491458)
+  }else if (substr(model,4,4)=="2"){
+  lmax_F<-c(-3.452034, -3.397353, -3.338161, -3.274413, -3.206141, -3.133463, -3.056598, -2.975869, -2.891711, -2.804664, -2.715369, -2.624553, -2.533006,
+   -2.441559, -2.351049, -2.262295, -2.176059, -2.093026, -2.013777, -1.938777,-1.868367, -1.802763, -1.742064, -1.686263, -1.635262, -1.588892, -1.546928,
+   -1.509104, -1.475133, -1.444715,-1.417548, -1.393338, -1.371803, -1.352676, -1.335710, -1.320676, -1.307365, -1.295588, -1.285173, -1.275967,-1.267833,
+   -1.260648, -1.254303, -1.248699, -1.243753, -1.239385, -1.235531, -1.232128, -1.229125, -1.226475,-1.224135, -1.222071, -1.220249, -1.218641, -1.217222,
+   -1.215970, -1.214865, -1.213890, -1.213029, -1.212270,-1.223131, -1.234272, -1.245697, -1.257415, -1.269433, -1.281760, -1.294402, -1.307367, -1.320665,
+   -1.334304, -1.348291, -1.362638, -1.377351, -1.392442, -1.407919, -1.423792, -1.440072, -1.456769, -1.473894, -1.491458)
+  }
+
+  #Extracting arguments to make a dat file for TMB
+  dat<-list(fyear=x[1], lyear=x[2], fage=x[3], lage=x[4], years=c(as.integer(x[1]):as.integer(x[2])), ages=c(as.integer(x[3]):as.integer(x[4])),
+            M_vec=x[5:25],
+            obs_harv=x[26:(25+as.integer(x[2]))],
+            obs_fishery_cpue=x[(25+as.integer(x[2])+1):(25+as.integer(x[2])*2)],
+            obs_fishery_comp=matrix(x[(25+as.integer(x[2])*2+1):(25+as.integer(x[2])*2+(x[2]*(x[4]+1)))],nrow=as.integer(x[2]), ncol=as.integer(x[4]+1), byrow=T),
+            SS_fishery=x[(25+as.integer(x[2])*2+(x[2]*(x[4]+1))+1):((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2]))],
+            obs_FIM_CPUE=x[((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])+1):((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2)],
+            obs_FIM_comp=matrix(x[((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2+1):((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2+(x[2]*(x[4]+1)))],nrow=as.integer(x[2]), ncol=as.integer(x[4]+1), byrow=T),
+            SS_FIM=x[((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2+(x[2]*(x[4]+1))+1):((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2+(x[2]*(x[4]+1))+as.integer(x[2]))],
+            Fecund_aa=x[((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2+(x[2]*(x[4]+1))+as.integer(x[2])+1):((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2+(x[2]*(x[4]+1))+as.integer(x[2])+x[4]+1)],
+            Wtage=x[((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2+(x[2]*(x[4]+1))+as.integer(x[2])+x[4]+2):((25+as.integer(x[2])*2+(x[2]*(x[4]+1)))+as.integer(x[2])*2+(x[2]*(x[4]+1))+as.integer(x[2])+(x[4]+1)*2)],
+            Effort=Eff[51:(50+x[2])],
+            test=x[(length(x)-2):length(x)])
+   if(wEff==FALSE){dat<-dat[-which(names(dat)=="Effort")]} 
+         
+   par <- list(log_M_scalar=log(0.099),
+              log_q=-12.65,
+              log_q_FIM=-14.275,
+              log_recruit_devs=rep(0,dat$lyear+dat$lage),
+              steepness=0.99,
+              log_R0_FLA=17.3204,
+              log_sigma_rec=log(0.3),
+              log_cv_fishery=log(0.05),
+              log_cv_fishery_CPUE=log(0.25),
+              log_cv_FIM_CPUE=-1.84,
+              FIM_sellogis_k=2,
+              FIM_sellogis_midpt=2,
+              lphi=1,
+              est_psi=1,
+              lphi_surv=3,
+              est_psi_surv=3,
+              B1=3.170388,
+              B2=-4.187365,
+              B3=1.048499,
+              B4=1.028458,
+              B5=-4.906849,
+              B6=1.116807,
+              log_fint=lmax_F)
+              
+  lower_bounds<-c(-5,-20,-20,rep(-10,dat$lyear+dat$lage), 0, 10, -5,-5,-5,-5,-2,  0,-100,-100,-100,-100,-10,-10,-10,-10,-10,-10,rep(-20,dat$lyear))
+  upper_bounds<-c( 2,  1,  1,rep( 10,dat$lyear+dat$lage), 1, 25,  2, 2, 2, 2, 5, 20, 100, 100, 100, 100, 20, 20, 20, 20, 20, 20,rep(  0,dat$lyear))
+  
+  if(wEff==TRUE){
+   par<-par[-which(names(par)=="log_fint")]
+   lower_bounds<-c(-5,-20,-20,rep(-10,dat$lyear+dat$lage), 0, 10, -5,-5,-5,-5,-2,  0,-100,-100,-100,-100,-10,-10,-10,-10,-10,-10)
+   upper_bounds<-c( 2,  1,  1,rep( 10,dat$lyear+dat$lage), 1, 25,  2, 2, 2, 2, 5, 20, 100, 100, 100, 100, 20, 20, 20, 20, 20, 20)
+  }
+  
+  #Parameter names
+  parm_names<-names(MakeADFun(dat, par, DLL=TMB_name)$par)
+  reffects=c("log_recruit_devs")    
+
+  if(surv==TRUE & Est_Rsd==TRUE){
+   fixed<-list(log_M_scalar=factor(NA),steepness=factor(NA),log_cv_fishery=factor(NA),log_cv_fishery_CPUE=factor(NA))  
+  } else if(surv==TRUE & Est_Rsd==FALSE){
+   fixed<-list(log_M_scalar=factor(NA),steepness=factor(NA),log_sigma_rec=factor(NA),log_cv_fishery=factor(NA),log_cv_fishery_CPUE=factor(NA))  
+  } else if(surv==FALSE & Est_Rsd==TRUE){
+   fixed<-list(log_M_scalar=factor(NA),log_q_FIM=factor(NA),steepness=factor(NA),log_cv_fishery=factor(NA),log_cv_fishery_CPUE=factor(NA),
+               log_cv_FIM_CPUE=factor(NA),FIM_sellogis_k=factor(NA),FIM_sellogis_midpt=factor(NA),ltheta_FIM=factor(NA))
+  } else if(surv==FALSE & Est_Rsd==FALSE){
+   fixed<-list(log_M_scalar=factor(NA),log_q_FIM=factor(NA),steepness=factor(NA),log_sigma_rec=factor(NA),log_cv_fishery=factor(NA),
+               log_cv_fishery_CPUE=factor(NA),log_cv_FIM_CPUE=factor(NA),FIM_sellogis_k=factor(NA),FIM_sellogis_midpt=factor(NA),
+               ltheta_FIM=factor(NA))
+  }
+  
+  l<-lower_bounds[-which(parm_names %in% c(names(fixed),reffects))]
+  u<-upper_bounds[-which(parm_names %in% c(names(fixed),reffects))]
+  
+  SCAA <- MakeADFun(dat, par, DLL=TMB_name, map=fixed, random=reffects);
+
+  counter<-1  
+  tryCatch({
+   SCAA_fit <- fit_tmb(obj=SCAA, startpar=SCAA$par, lower=l, upper=u, newtonsteps=1, getsd=TRUE,bias.correct=TRUE,getHessian=TRUE)
+  }, error=function(e){counter<<-0})
+   
+   convcounter<-1
+   if(is.null(SCAA_fit$hessian)){
+   jfactor<-10
+   while(counter==1 & is.null(SCAA_fit$hessian) & convcounter < 5){
+    if(Est_Rsd==TRUE){
+    par <- list(log_M_scalar=log(0.099),log_q=jitter(-12.65,jfactor),log_q_FIM=jitter(-14.275, jfactor),
+                log_recruit_devs=jitter(rep(0,dat$lyear+dat$lage),jfactor),steepness=0.99,log_R0_FLA=jitter(17.3204,jfactor),
+                log_sigma_rec=jitter(log(0.3),jfactor),log_cv_fishery=log(0.05),log_cv_fishery_CPUE=log(0.25),log_cv_FIM_CPUE=jitter(-1.84,jfactor),
+                FIM_sellogis_k=jitter(2,jfactor),FIM_sellogis_midpt=jitter(2,jfactor),lphi=jitter(1,jfactor),est_psi=jitter(1,jfactor),
+                lphi_surv=jitter(3,jfactor),est_psi_surv=jitter(3,jfactor),B1=jitter(3.17,jfactor),B2=jitter(-4.18,jfactor),
+                B3=jitter(1.04,jfactor),B4=jitter(1.02,jfactor),B5=jitter(-4.9,jfactor),B6=jitter(1.11,jfactor),log_fint=jitter(lmax_F,jfactor))
+                
+    if(wEff==TRUE){par<-par[-which(names(par)=="log_fint")]}
+    } else if(Est_Rsd==FALSE){
+    par <- list(log_M_scalar=log(0.099),log_q=jitter(-12.65,jfactor),log_q_FIM=jitter(-14.275, jfactor),
+                log_recruit_devs=jitter(rep(0,dat$lyear+dat$lage),jfactor),steepness=0.99,log_R0_FLA=jitter(17.3204,jfactor),
+                log_sigma_rec=log(0.3),log_cv_fishery=log(0.05),log_cv_fishery_CPUE=log(0.25),log_cv_FIM_CPUE=jitter(-1.84,jfactor),
+                FIM_sellogis_k=jitter(2,jfactor), FIM_sellogis_midpt=jitter(2,jfactor),lphi=jitter(1,jfactor),est_psi=jitter(1,jfactor),
+                lphi_surv=jitter(3,jfactor),est_psi_surv=jitter(3,jfactor),B1=jitter(3.17,jfactor),B2=jitter(-4.18,jfactor),
+                B3=jitter(1.04,jfactor),B4=jitter(1.02,jfactor),B5=jitter(-4.9,jfactor),B6=jitter(1.11,jfactor),log_fint=jitter(lmax_F,jfactor))
+                
+    if(wEff==TRUE){par<-par[-which(names(par)=="log_fint")]}
+    }
+    SCAA <- MakeADFun(dat, par, DLL=TMB_name, map=fixed, random=reffects)
+     tryCatch({
+      SCAA_fit <- fit_tmb(obj=SCAA, startpar=SCAA$par, lower=l, upper=u, newtonsteps=1, getsd=TRUE,bias.correct=TRUE,getHessian=TRUE)
+     }, error=function(e){counter<<-0})
+    convcounter<-sum(convcounter, 1)
+   }
+  }
+
+  if (substr(model,8,8)=="1"){
+   dname<-paste0(OM,substr(model,5,7),".",substr(model,8,8),"_",i)
+  } else if (substr(model,8,8) %in% c("2","3")){
+   dname<-paste0(OM,substr(model,5,7),".",as.numeric(substr(model,8,8))-1,"_",i)
+  }
+  #Extracting arguments to make a dat file for TMB
+
+  dir.create(paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",dname,"/",model))
+
+  if(counter==1){
+  summ_sdr<-summary(SCAA_fit$SD)
+
+  repor<-SCAA$report(SCAA$env$last.par.best)
+  save(repor, file=paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",dname,"/",model,"/report.RData"))
+  save(summ_sdr, file=paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",dname,"/",model,"/summ_sdr.RData")) 
+  save(SCAA_fit, file=paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",dname,"/",model,"/SCAA_fit.RData"))  
+  }
+  write(counter, file=paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",dname,"/",model,"/counter.txt"))
+  write(convcounter, file=paste0("/blue/edvcamp/nfisch/Chapter_4/OMs/",dname,"/",model,"/convcounter.txt"))
+ } 
+}
+
+#Call to fit function
+
+#OM11
+#run_TMB(N=1:100,model="OM11SM11EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM11SM12EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM11SM13EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM11SM21EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM11SM22EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM11SM23EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM11SM31EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM11SM32EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+run_TMB(N=91:100,model="OM11SM33EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+
+#OM12
+#run_TMB(N=1:100,model="OM12SM11EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM12SM12EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM12SM13EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM12SM21EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM12SM22EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM12SM23EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM12SM31EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM12SM32EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM12SM33EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+
+#OM21
+#run_TMB(N=1:100,model="OM21SM11EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM21SM12EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM21SM13EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM21SM21EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM21SM22EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM21SM23EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM21SM31EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=78:100,model="OM21SM32EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM21SM33EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+
+#OM22
+#run_TMB(N=1:100,model="OM22SM11EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM22SM12EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM22SM13EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM22SM21EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM22SM22EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM22SM23EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM22SM31EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM22SM32EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM22SM33EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+
+#OM31
+#run_TMB(N=1:100,model="OM31SM11EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM31SM12EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM31SM13EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM31SM21EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM31SM22EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM31SM23EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM31SM31EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM31SM32EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM31SM33EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+
+#OM32
+#run_TMB(N=1:100,model="OM32SM11EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM32SM12EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM32SM13EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM32SM21EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM32SM22EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM32SM23EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM32SM31EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM32SM32EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM32SM33EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+
+#OM41
+#run_TMB(N=1:100,model="OM41SM11EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM41SM12EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM41SM13EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM41SM21EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM41SM22EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM41SM23EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM41SM31EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM41SM32EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM41SM33EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+
+#OM42
+#run_TMB(N=1:100,model="OM42SM11EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM42SM12EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM42SM13EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM42SM21EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM42SM22EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM42SM23EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM42SM31EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM42SM32EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+#run_TMB(N=1:100,model="OM42SM33EM1115_wsurv", surv=TRUE, Est_Rsd=TRUE, PE="PE", wEff=FALSE);
+
+

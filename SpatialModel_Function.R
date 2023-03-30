@@ -6,7 +6,7 @@ rm(list=ls(all=TRUE))
 
 Spatial_Model<-function(save_wd,               #Working directory for saving output and data
                         seed,                  #random number seed
-                        PE,                    #Process Error (turned on or off via T/F)
+                        PE,                    #Process Variation (turned on or off via T/F)
                         nyear,                 #Number of years in simulation, first 50 years will be unfished 
                         nyear_init,            #Number of unfished years to start simulation    
                         num_ages,              #Number of ages
@@ -61,14 +61,14 @@ Spatial_Model<-function(save_wd,               #Working directory for saving out
   R0<-1.63E8      #Unfished recruitment
   SSB0<-4.72E15  #Unfished Spawning Biomass size (Eggs) for the entire GOM, not used 
   
-  #Actual Red Snapper Data from Zach and Fabio
+  #Spatially referenced red snapper catch at age data was compiled from the US Gulf of Mexico reef fish bottom longline and vertical line observer database
   if (Super_Comp==FALSE){
     load("C:/Users/nfisch/Documents/RSnapper_Data/ssdf_drop_2.RDATA", verbose=T) 
   } else if (Super_Comp==TRUE){
     load("/blue/edvcamp/nfisch/Spatial_Model/ssdf_drop_2.Rdata", verbose=T) 
   }
   
-  #Depth Data
+  #Depth and substrate data for the GOM
   if (Super_Comp==FALSE){
     Cells<-read.delim("C:/Users/nfisch/Documents/Snapper_Simulation_Assessments/GOMFLA_Depth_n_substrate.txt", sep=" ",header=TRUE)
   } else if(Super_Comp==TRUE){
@@ -178,7 +178,7 @@ Spatial_Model<-function(save_wd,               #Working directory for saving out
     County_Distance<-as.matrix(read.table("/blue/edvcamp/nfisch/Spatial_Model/County_Distance.txt"))
   }
   
-  #Exponential Distance function based on data
+  #Exponential Distance function based on tagging data
   if (Super_Comp==FALSE){
     RSnap_Tag<-read.csv("C:/Users/nfisch/Documents/RSnapper_Data/Tag_snapper.csv")
   } else if (Super_Comp==TRUE){
