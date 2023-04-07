@@ -20,6 +20,8 @@ TMB_Models includes all of the TMB Estimation models used
   
   EM1115 - Baseline Estimation model with Multivariate-Tweedie for fitting composition data
   
+  EM1116 - Baseline Estimation model with Logistic-normal for fitting composition data however without relative weighting between years based on sample size
+  
 
   EM1121 - Estimation models with white noise variability in Natural Mortality and Dirichlet-multinomial for fitting composition data 
   
