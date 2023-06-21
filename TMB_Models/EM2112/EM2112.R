@@ -117,7 +117,7 @@ if(surv==TRUE){
   
   #Param bounds
   lower_bounds<-c(-5,-20,-20,rep(-10,dat$lyear+dat$lage), 0, 10, -5,-5,-5,-5,-2, 0,-1000,-5,-1000,-7,-10,-10,-10,-10,-10,-10,rep(-20,dat$lyear),-10,rep(-10,length(dat$fyear:dat$lyear)*length(2:10)))
-  upper_bounds<-c( 2,  1,  1,rep( 10,dat$lyear+dat$lage), 1, 25,  2, 2, 2, 2, 5,20, 1000, 5, 1000, 5, 20, 20, 20, 20, 20, 20,rep( 0, dat$lyear),  1,rep(  1,length(dat$fyear:dat$lyear)*length(2:10)))
+  upper_bounds<-c( 2,  1,  1,rep( 10,dat$lyear+dat$lage), 1, 25,  2, 2, 2, 2, 5,20, 1000, 5, 1000, 5, 20, 20, 20, 20, 20, 20,rep( 0, dat$lyear),  1,rep( 10,length(dat$fyear:dat$lyear)*length(2:10)))
   
   if(surv==TRUE & Est_Rsd==TRUE){
     fixed<-list(log_M_scalar=factor(NA),steepness=factor(NA),log_cv_fishery=factor(NA),log_cv_fishery_CPUE=factor(NA))  
