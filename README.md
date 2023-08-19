@@ -1,5 +1,5 @@
 # Fischetal2023
-Code associated with ICES paper (Fisch et al. in review)
+Code associated with ICES paper (Fisch et al. 2023)
 
 SpatialModel_Function.R - Spatially Explicit Simulation Operating Model
 
